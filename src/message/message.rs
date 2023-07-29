@@ -1,4 +1,4 @@
-pub mod message {
+
     pub struct Message {
         pub command: String,
         pub args: Vec<String>,
@@ -59,4 +59,3 @@ pub mod message {
             Ok(Message { command, args })
         }
     }
-}

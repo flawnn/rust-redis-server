@@ -2,23 +2,18 @@ use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     thread,
-    time::Duration,
 };
 
-use crate::message::message::Message;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::message::commands::{
+    echo::handle_echo, get::handle_get, ping::handle_ping, set::handle_set,
+};
+use crate::{message::message::Message, structs::app_state::AppState};
 
 mod message;
-
-struct AppState {
-    dict: Mutex<HashMap<String, Entry>>,
-}
-
-struct Entry(String, Option<EntryDate>);
-struct EntryDate(SystemTime, String);
-
+mod structs;
 fn main() {
     println!("Server started up! 💯");
 
@@ -65,118 +60,21 @@ fn handle_client(mut stream: TcpStream, app_state: &Arc<AppState>) {
 
                 match msg {
                     Ok(message) => {
+                        // match message.command.as_str() {}
                         if message.command == "ping" {
-                            let _ = stream.write_all(b"+PONG\r\n").unwrap();
+                            handle_ping(&mut stream);
                         }
 
                         if message.command == "echo" {
-                            let response = [
-                                "$",
-                                message.args[1].len().to_string().as_str(),
-                                "\r\n".to_string().as_str(),
-                                (message.args[1]).as_str(),
-                                "\r\n".to_string().as_str(),
-                            ]
-                            .concat();
-                            let _ = stream.write_all(&response[..].as_bytes()).unwrap();
+                            handle_echo(&message, &mut stream);
                         }
 
                         if message.command == "get" {
-                            let dict = app_state.dict.lock().unwrap();
-
-                            let entry = dict.get(&message.args[1]);
-
-                            let mut val: Option<String> = None;
-
-                            match entry {
-                                Some(refer) => match &refer.1 {
-                                    Some(px_time) => {
-                                        let now = SystemTime::now();
-
-                                        let is_already_past = px_time.0
-                                            + Duration::from_millis(
-                                                px_time.1.parse::<u64>().unwrap(),
-                                            )
-                                            < now;
-
-                                        if is_already_past {
-                                            send_nil(&mut stream);
-                                            continue;
-                                        } else {
-                                            val = Some(refer.0.clone());
-                                        }
-                                    }
-                                    None => {
-                                        val = Some(refer.0.clone());
-                                    }
-                                },
-                                None => send_nil(&mut stream),
-                            }
-
-                            // If val is not empty, we got a value back
-                            match val {
-                                Some(val) => {
-                                    let response = [
-                                        "$",
-                                        val.len().to_string().as_str(),
-                                        "\r\n".to_string().as_str(),
-                                        (val).as_str(),
-                                        "\r\n".to_string().as_str(),
-                                    ]
-                                    .concat();
-                                    let _ = stream.write_all(&response[..].as_bytes()).unwrap();
-                                }
-                                None => send_nil(&mut stream),
-                            }
-
-                            drop(dict);
+                            handle_get(app_state, &message, &mut stream);
                         }
 
                         if message.command == "set" {
-                            let mut dict = app_state.dict.lock().unwrap();
-
-                            let mut insert_op: Option<Entry> = None;
-                            let mut inserted: bool = false;
-
-                            if let Some(third_arg) = message.args.get(3) {
-                                if third_arg == "px" {
-                                    if let Some(exp_time) = message.args.get(4) {
-                                        insert_op = dict.insert(
-                                            message.args[1].clone(),
-                                            Entry(
-                                                message.args[2].clone(),
-                                                Some(EntryDate(
-                                                    SystemTime::now(),
-                                                    exp_time.to_string(),
-                                                )),
-                                            ),
-                                        );
-
-                                        inserted = true;
-                                    } else {
-                                        send_nil(&mut stream);
-                                    }
-                                }
-                            } else {
-                                insert_op = dict.insert(
-                                    message.args[1].clone(),
-                                    Entry(message.args[2].clone(), None),
-                                );
-
-                                inserted = true;
-                            }
-
-                            // TODO: Add returning old value
-                            match insert_op {
-                                Some(old) => (),
-                                None => (),
-                            }
-
-                            if inserted {
-                                send_ok(&mut stream);
-                            }
-
-                            drop(dict);
+                            handle_set(app_state, message, &mut stream);
                         }
                     }
                     Err(error) => {

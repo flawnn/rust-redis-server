@@ -2,16 +2,22 @@ use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     thread,
+    time::Duration,
 };
 
 use crate::message::message::Message;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+
 mod message;
 
 struct AppState {
-    dict: Mutex<HashMap<String, String>>,
+    dict: Mutex<HashMap<String, Entry>>,
 }
+
+struct Entry(String, Option<EntryDate>);
+struct EntryDate(SystemTime, String);
 
 fn main() {
     println!("Server started up! 💯");
@@ -39,6 +45,9 @@ fn main() {
         }
     }
 }
+
+static NIL_STRING: &str = "$-1\r\n";
+static OK_STRING: &str = "+OK\r\n";
 
 fn handle_client(mut stream: TcpStream, app_state: &Arc<AppState>) {
     let mut buffer = [0; 1024];
@@ -73,21 +82,52 @@ fn handle_client(mut stream: TcpStream, app_state: &Arc<AppState>) {
                         }
 
                         if message.command == "get" {
-                            let mut dict = app_state.dict.lock().unwrap();
+                            let dict = app_state.dict.lock().unwrap();
 
-                            let nil_value: String = "nil".to_string();
+                            let entry = dict.get(&message.args[1]);
 
-                            let val = dict.get(&message.args[1]).unwrap_or(&nil_value);
+                            let mut val: Option<String> = None;
 
-                            let response = [
-                                "$",
-                                val.len().to_string().as_str(),
-                                "\r\n".to_string().as_str(),
-                                (val).as_str(),
-                                "\r\n".to_string().as_str(),
-                            ]
-                            .concat();
-                            let _ = stream.write_all(&response[..].as_bytes()).unwrap();
+                            match entry {
+                                Some(refer) => match &refer.1 {
+                                    Some(px_time) => {
+                                        let now = SystemTime::now();
+
+                                        let is_already_past = px_time.0
+                                            + Duration::from_millis(
+                                                px_time.1.parse::<u64>().unwrap(),
+                                            )
+                                            < now;
+
+                                        if is_already_past {
+                                            send_nil(&mut stream);
+                                            continue;
+                                        } else {
+                                            val = Some(refer.0.clone());
+                                        }
+                                    }
+                                    None => {
+                                        val = Some(refer.0.clone());
+                                    }
+                                },
+                                None => send_nil(&mut stream),
+                            }
+
+                            // If val is not empty, we got a value back
+                            match val {
+                                Some(val) => {
+                                    let response = [
+                                        "$",
+                                        val.len().to_string().as_str(),
+                                        "\r\n".to_string().as_str(),
+                                        (val).as_str(),
+                                        "\r\n".to_string().as_str(),
+                                    ]
+                                    .concat();
+                                    let _ = stream.write_all(&response[..].as_bytes()).unwrap();
+                                }
+                                None => send_nil(&mut stream),
+                            }
 
                             drop(dict);
                         }
@@ -95,27 +135,41 @@ fn handle_client(mut stream: TcpStream, app_state: &Arc<AppState>) {
                         if message.command == "set" {
                             let mut dict = app_state.dict.lock().unwrap();
 
-                            let ret: String = "OK".to_string();
+                            let mut insert_op: Option<Entry> = None;
 
-                            let insert_op =
-                                dict.insert(message.args[1].clone(), message.args[2].clone());
-
-                            // TODO: Add returning old value
-                            match insert_op {
-                                Some(old) => (),
-                                None => (),
+                            if let Some(third_arg) = message.args.get(3) {
+                                if third_arg == "px" {
+                                    if let Some(exp_time) = message.args.get(4) {
+                                        insert_op = dict.insert(
+                                            message.args[1].clone(),
+                                            Entry(
+                                                message.args[2].clone(),
+                                                Some(EntryDate(
+                                                    SystemTime::now(),
+                                                    exp_time.to_string(),
+                                                )),
+                                            ),
+                                        );
+                                    } else {
+                                        send_nil(&mut stream);
+                                    }
+                                }
+                            } else {
+                                insert_op = dict.insert(
+                                    message.args[1].clone(),
+                                    Entry(message.args[2].clone(), None),
+                                );
                             }
 
-                            let response = [
-                                "$",
-                                ret.len().to_string().as_str(),
-                                "\r\n".to_string().as_str(),
-                                (ret).as_str(),
-                                "\r\n".to_string().as_str(),
-                            ]
-                            .concat();
+                            // TODO: Add returning old value
+                            // match insert_op {
+                            //     Some(old) => (),
+                            //     None => (),
+                            // }
 
-                            let _ = stream.write_all(&response[..].as_bytes()).unwrap();
+                            if insert_op.is_some() {
+                                send_ok(&mut stream);
+                            }
 
                             drop(dict);
                         }
@@ -131,4 +185,12 @@ fn handle_client(mut stream: TcpStream, app_state: &Arc<AppState>) {
             }
         }
     }
+}
+
+fn send_nil(stream: &mut TcpStream) {
+    let _ = stream.write_all(&NIL_STRING[..].as_bytes()).unwrap();
+}
+
+fn send_ok(stream: &mut TcpStream) {
+    let _ = stream.write_all(&OK_STRING[..].as_bytes()).unwrap();
 }

@@ -136,6 +136,7 @@ fn handle_client(mut stream: TcpStream, app_state: &Arc<AppState>) {
                             let mut dict = app_state.dict.lock().unwrap();
 
                             let mut insert_op: Option<Entry> = None;
+                            let mut inserted: bool = false;
 
                             if let Some(third_arg) = message.args.get(3) {
                                 if third_arg == "px" {
@@ -150,6 +151,8 @@ fn handle_client(mut stream: TcpStream, app_state: &Arc<AppState>) {
                                                 )),
                                             ),
                                         );
+
+                                        inserted = true;
                                     } else {
                                         send_nil(&mut stream);
                                     }
@@ -159,15 +162,17 @@ fn handle_client(mut stream: TcpStream, app_state: &Arc<AppState>) {
                                     message.args[1].clone(),
                                     Entry(message.args[2].clone(), None),
                                 );
+
+                                inserted = true;
                             }
 
                             // TODO: Add returning old value
-                            // match insert_op {
-                            //     Some(old) => (),
-                            //     None => (),
-                            // }
+                            match insert_op {
+                                Some(old) => (),
+                                None => (),
+                            }
 
-                            if insert_op.is_some() {
+                            if inserted {
                                 send_ok(&mut stream);
                             }
 

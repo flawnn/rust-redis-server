@@ -1,8 +1,9 @@
 
 use std::{time::SystemTime, sync::Arc, net::TcpStream};
 
-use crate::{structs::{entry::Entry, app_state::AppState, entry_date::EntryDate}, send_nil, send_ok, message::message::Message};
+use crate::{structs::{entry::Entry, app_state::AppState, entry_date::EntryDate}, message::{message::Message, util::send_ok}};
 
+use crate::message::util::send_nil;
 
 pub fn handle_set(app_state: &Arc<AppState>, message: Message, stream: &mut TcpStream) {
     let mut dict = app_state.dict.lock().unwrap();

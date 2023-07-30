@@ -3,7 +3,8 @@ use std::{io::Write, net::TcpStream, time::Duration};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::{message::message::Message, send_nil, structs::app_state::AppState};
+use crate::message::util::send_nil;
+use crate::{message::message::Message, structs::app_state::AppState};
 
 pub fn handle_get(app_state: &Arc<AppState>, message: &Message, stream: &mut TcpStream) {
     let dict = app_state.dict.lock().unwrap();
